@@ -20,4 +20,4 @@ class Mango:
         self.modules.load_modules()
     
     def run_analysis(self):
-        self.modules.run_analysis(self.disas.functions)
+        self.modules.run_analysis(self.disas.functions, self.disas.get_rodata())

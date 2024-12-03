@@ -70,9 +70,9 @@ class MangoModules:
             print(f"Description: {mod_conf['description']}")
         print("-"*24)
 
-    def run_analysis(self, functions:list):
+    def run_analysis(self, functions:list, rodata:dict):
         for module, conf, py_mod in self.analysis_queue:
             if "MangoRunThis" in dir(py_mod):
                 self.dump_module(module, conf)
-                py_mod.MangoRunThis(functions)
+                py_mod.MangoRunThis(functions, rodata)
                 print("\n")

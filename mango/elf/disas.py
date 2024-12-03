@@ -1,14 +1,8 @@
 from os import popen
 import re
 
-GCC_BLTIN_FUNCS = [
-    "_start",
-    "_dl_relocate_static_pie",
-    "deregister_tm_clones",
-    "register_tm_clones",
-    "__do_global_dtors_aux",
-    "frame_dummy",
-]
+from elf.blacklist import *
+
 
 OBJDUMP_FLAGS = [
     "-d",
@@ -42,6 +36,43 @@ class Disassembler:
         self.current_function = None
         for line in lines:
             self.parse_line(line)
+        
+        self.rodata ={
+            "offset": 0,
+            "size": 0,
+            "data": []
+        }
+        fd=popen("objdump -s -j .rodata " + path)
+        lines = fd.readlines()
+        fd.close()
+        self.parse_rodata(lines)
+
+    def get_rodata(self)->dict:
+        return self.rodata
+
+    def parse_rodata(self, lines:str):
+        i=0
+        while (i<len(lines) and not lines[i].strip().endswith(".rodata:")):
+            i+=1
+        i+=1
+        if (i>=len(lines)):
+            return
+        data:bytes=[]
+        begin_address:int=None
+        for line in lines[i:]:
+            line = line.strip().split('  ')
+            if (len(line) < 2):
+                data += [' ']*16
+            else:
+                line = line[:-1][0].split()
+                if (not begin_address):
+                    begin_address = int(line[0], 16)
+                for b in line[1:]:
+                    for i in range(0, len(b), 2):
+                        data.append(int(b[i:i+2], 16))
+        self.rodata["offset"] = begin_address
+        self.rodata["size"] = len(data)
+        self.rodata["data"] = data
 
     def isFunctionLabel(self, line:str) -> bool:
         return re.match(r"^[0-9a-f]+ <.*>:$", line) != None
@@ -53,7 +84,14 @@ class Disassembler:
         match = re.match(r"^[0-9a-f]+ <(.*)>:$", line)
         name = match.group(1)
         address = int(line.split()[0], 16)
-        if (name in GCC_BLTIN_FUNCS):
+        if (
+            name in GCC_BLACKLIST
+            or name.startswith("_")
+            or name.startswith(".")
+            or name.endswith(".cold")
+            or name.endswith(".0")
+            or name.startswith("dl_")
+            ):
             self.current_function = None
             return
         self.current_function = Function(address, name)
@@ -63,10 +101,10 @@ class Disassembler:
         match = re.match(r"^[0-9a-f]+:.*\t(.*)$", line)
         address = int(line.split()[0][:-1], 16)
         opcodes = []
-        i=1
-        while (i<len(line) and len(line[i])==2 and line[i][0] in "0123456789abcdef"):
-            opcodes.append(int(line[i], 16))
-            i+=1
+        for op in line.split()[1:]:
+            if not (len(op)==2 and op[0] in "0123456789abcdef" and op[1] in "0123456789abcdef"):
+                break
+            opcodes.append(int(op, 16))
         asm = match.group(1)
         asm = asm.split()
         i=0
