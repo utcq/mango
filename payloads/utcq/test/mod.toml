@@ -1,0 +1,5 @@
+[MModule]
+name = "Nested modules test"
+author = "utcq"
+version = "0.0.1"
+dependencies = []

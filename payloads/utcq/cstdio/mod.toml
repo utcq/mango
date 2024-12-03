@@ -1,0 +1,8 @@
+[MModule]
+name = "C Standard I/O Analyzer"
+author = "utcq"
+version = "0.0.1"
+description = "Finds C stdio vulns"
+dependencies = [
+    "utcq/test"
+]
