@@ -62,7 +62,7 @@ class Disassembler:
         for line in lines[i:]:
             line = line.strip().split('  ')
             if (len(line) < 2):
-                data += [' ']*16
+                data += [ord(' ')]*16
             else:
                 line = line[:-1][0].split()
                 if (not begin_address):

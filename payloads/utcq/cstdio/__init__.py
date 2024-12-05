@@ -9,7 +9,12 @@ def util_get_rodata(rodata:dict, addr:int):
     index = (addr-rodata["offset"])
     if (index < 0 or index >= rodata["size"]):
         return None
-    return bytearray(rodata["data"][index:]).decode("ascii").split("\x00")[0]
+    data = ""
+    for i in range(index, len(rodata["data"])): 
+        if (rodata["data"][i] == 0):
+            break
+        data += chr(rodata["data"][i])
+    return data
 
 class MangoRunThis():
     def __init__(self, functions:list[Function], rodata:dict):
@@ -19,6 +24,9 @@ class MangoRunThis():
         self.stack_vulns = {
             "freeInputs": {},
             "stackSize": 0
+        }
+        self.cached = {
+            "io_emulation": ""
         }
         self.analzye()
     
@@ -73,6 +81,12 @@ class MangoRunThis():
                 "type": "rip",
                 "off": int(arg[5:-1], 16)
             }
+        elif arg.startswith("0x"):
+            # absolute address of rodata
+            return {
+                "type": "rod",
+                "off": int(arg, 16)
+            }
         raise ValueError("Unknown stack offset syntax, contribute to the project, implement me! " + arg)
 
     def analzye(self):
@@ -89,6 +103,11 @@ class MangoRunThis():
                     self.__analyze_stack(i, instr)
                 elif (instr.asm[0] == 'call'):
                     self.__analyze_call(i, instr)
+            
+            if (self.cached["io_emulation"] != ""):
+                LOG("Showing emulated IO:");
+                print(self.cached["io_emulation"])
+                self.cached["io_emulation"] = ""
 
     def __analyze_argument(self, i:int, instr:Instruction, reg:str="rdi"):
         stack_pos = None
@@ -104,24 +123,44 @@ class MangoRunThis():
                     # we have found the buffer argument
                     if (args[1] == "rax"):
                         prev_instr = self.fn_instr[i-1].asm
+                        prev_instr2 = self.fn_instr[i-2].asm
                         if (prev_instr[0] == 'mov' or prev_instr[0] == 'lea'):
-                            stack_pos = prev_instr[1].split(",")[1]
-                            arg_instr = self.fn_instr[i-1]
-                            break
+                            if (prev_instr[1].split(",")[0] == 'rax'):
+                                stack_pos = prev_instr[1].split(",")[1]
+                                arg_instr = self.fn_instr[i-1]
+                                break
+                        if (prev_instr[0] == 'add' or prev_instr[0] == 'sub'
+                            and (prev_instr2[0] == 'mov' or prev_instr2[0] == 'lea')
+                        ):
+                            if (prev_instr[1].split(",")[0] == 'rax'):
+                                if (prev_instr2[1].split(",")[0] == 'rax'):
+                                    stack_pos = prev_instr2[1].split(",")[1]
+                                    stack_pos_int = int(stack_pos.split("-")[1][:-1],16)
+                                    if (prev_instr[0] == 'add'):
+                                        stack_pos_int -= int(prev_instr[1].split(",")[1], 16)
+                                    else:
+                                        stack_pos_int += int(prev_instr[1].split(",")[1], 16)
+                                    stack_pos = "[rbp-" + hex(stack_pos_int) + "]"
+                                    arg_instr = self.fn_instr[i-2]
+                                    break                        
                     else:
                         stack_pos = args[1]
                         arg_instr = self.fn_instr[i]
                         break
+                elif (reg=="rdi" and args[0]=="edi"):
+                    stack_pos = args[1]
+                    arg_instr = self.fn_instr[i]
             i-=1
         return stack_pos, arg_instr
 
     def __analyze_buffer_overflow(self, i:int, instr:Instruction, reg:str="rdi"):
-        stack_pos, _ = self.__analyze_argument(i, instr, reg)
+        stack_pos, arg_instr = self.__analyze_argument(i, instr, reg)
         if (stack_pos):
             stack_off = self._parse_stack_offset(stack_pos)
             if (stack_off["type"] == "rbp" or stack_off["type"] == "rsp"):
                 self.__log_buffer_overflow(stack_pos, instr)
                 self.stack_vulns["freeInputs"][stack_off["off"]] = instr
+        return stack_pos, arg_instr
 
     def __analyze_scanf(self, i:int, instr:Instruction):
         stack_pos, arg_instr = self.__analyze_argument(i, instr)
@@ -130,21 +169,45 @@ class MangoRunThis():
             if (stack_off["type"] == "rip"):
                 real_off = arg_instr.address + len(arg_instr.opcodes) + stack_off["off"]
                 string = util_get_rodata(self.rodata, real_off)
+                self.cached["io_emulation"] += "[INPUT] >> " +string+ " <<\n"
                 if (string=="%s"):
                     self.__analyze_buffer_overflow(i, instr, "rsi")
                 elif (string=="%d"):
                     self.__log_overunderflow(instr)
     
     def __analyze_gets(self, i, instr:Instruction):
-        self.__analyze_buffer_overflow(i, instr)
+        stack_pos, arg_instr = self.__analyze_buffer_overflow(i, instr)
+        if (stack_pos):
+            stack_off = self._parse_stack_offset(stack_pos)
+            if (stack_off["type"] == "rip"):
+                real_off = arg_instr.address + len(arg_instr.opcodes) + stack_off["off"]
+                string = util_get_rodata(self.rodata, real_off)
+                self.cached["io_emulation"] += string
     
     def __analyze_printf(self, i, instr:Instruction):
-        stack_pos, _ = self.__analyze_argument(i, instr)
+        stack_pos, arg_instr = self.__analyze_argument(i, instr)
         if (stack_pos):
             stack_off = self._parse_stack_offset(stack_pos)
             if (stack_off["type"] == "rbp" or stack_off["type"] == "rsp"):
                 if (stack_off["off"] in self.stack_vulns["freeInputs"]):
                     self.__log_format_vuln(instr, self.stack_vulns["freeInputs"][stack_off["off"]])
+            elif (stack_off["type"] == "rip"):
+                real_off = arg_instr.address + len(arg_instr.opcodes) + stack_off["off"]
+                string = util_get_rodata(self.rodata, real_off)
+                self.cached["io_emulation"] += string
+            elif (stack_off["type"] == "rod"):
+                string = util_get_rodata(self.rodata, stack_off["off"])
+                self.cached["io_emulation"] += string
+    
+    def __analyze_puts(self, i, instr:Instruction):
+        stack_pos, arg_instr = self.__analyze_argument(i, instr)
+        if (stack_pos):
+            stack_off = self._parse_stack_offset(stack_pos)
+            if (stack_off["type"] == "rip"):
+                real_off = arg_instr.address + len(arg_instr.opcodes) + stack_off["off"]
+                string = util_get_rodata(self.rodata, real_off)
+                self.cached["io_emulation"] += string + "\n"
+
 
     def __analyze_stack(self, i:int, instr:Instruction):
         args = instr.asm[1].split(",")
@@ -160,6 +223,8 @@ class MangoRunThis():
                 self.__analyze_gets(i, instr)
             case '<printf@plt>':
                 self.__analyze_printf(i, instr)
+            case '<puts@plt>':
+                self.__analyze_puts(i, instr)
 
             # C++
             case '<_IO_printf>':
@@ -168,3 +233,5 @@ class MangoRunThis():
                 self.__analyze_gets(i, instr)
             case '<_IO_scanf>':
                 self.__analyze_scanf(i, instr)
+            case '<_IO_puts>':
+                self.__analyze_puts(i, instr)

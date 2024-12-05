@@ -8,5 +8,9 @@ int main() {
     printf("Formatted: ");
     printf(buffer);
 
+    gets(buffer);
+    printf("Unformatted: ");
+    printf(buffer);
+
     return 0;
 }
