@@ -40,9 +40,9 @@ class MangoRunThis():
         self.unterminated_buffers = {}
         
         if remote_info and remote_info.get("has_libs"):
-            LOG("Remote environment detected:")
+            LOG("remote env:")
             if remote_info.get("libc_version"):
-                print(f"   GLIBC version: {STYLE_C.CYAN}{remote_info['libc_version']}{STYLE_C.END}")
+                print(f"   glibc: {STYLE_C.CYAN}{remote_info['libc_version']}{STYLE_C.END}")
             print()
         
         self.analzye()
@@ -67,9 +67,9 @@ class MangoRunThis():
             "read_size": None
         })
         OK(
-            f"Buffer overflow detected targetting stack position " + STYLE_C.BOLD + STYLE_C.CYAN + target_stack
+            f"buffer overflow @ " + STYLE_C.BOLD + STYLE_C.CYAN + target_stack
             + STYLE_C.END
-            + " generated from instruction:\n\t"
+            + " from:\n\t"
             + STYLE_C.RED + "(" + hex(source.address) + ") " + STYLE_C.YELLOW + ' '.join(source.asm)
             + "\n"
         )
@@ -83,10 +83,10 @@ class MangoRunThis():
             "read_size": read_size
         })
         OK(
-            f"Buffer overflow detected targetting stack position " + STYLE_C.BOLD + STYLE_C.CYAN + target_stack
+            f"buffer overflow @ " + STYLE_C.BOLD + STYLE_C.CYAN + target_stack
             + STYLE_C.END
-            + f" (buffer size: {buffer_size} bytes, read size: {read_size} bytes)"
-            + " generated from instruction:\n\t"
+            + f" (buf={buffer_size}B, reads {read_size}B, overflow={read_size-buffer_size}B)"
+            + " from:\n\t"
             + STYLE_C.RED + "(" + hex(source.address) + ") " + STYLE_C.YELLOW + ' '.join(source.asm)
             + "\n"
         )
@@ -98,25 +98,25 @@ class MangoRunThis():
             "buffer_location": buffer_location
         })
         OK(
-            f"Unterminated string leak detected! Buffer at " + STYLE_C.BOLD + STYLE_C.CYAN + buffer_location
+            f"unterminated string leak @ " + STYLE_C.BOLD + STYLE_C.CYAN + buffer_location
             + STYLE_C.END
             + " filled by:\n\t"
             + STYLE_C.RED + "(" + hex(read_instr.address) + ") " + STYLE_C.YELLOW + ' '.join(read_instr.asm)
             + STYLE_C.END
-            + "\n\tthen printed without null termination by:\n\t"
+            + "\n\tprinted by:\n\t"
             + STYLE_C.RED + "(" + hex(print_instr.address) + ") " + STYLE_C.YELLOW + ' '.join(print_instr.asm)
             + STYLE_C.END
-            + f"\n\t{STYLE_C.MAGENTA}Can leak data beyond the buffer!{STYLE_C.END}\n"
+            + f"\n\t{STYLE_C.MAGENTA}→ leaks memory past buffer{STYLE_C.END}\n"
         )
     
     def __log_format_vuln(self, source:Instruction, target:Instruction):
         ret_addr_after_printf = source.address + len(source.opcodes)
         
-        self.vulnerabilities["format_strings"].append({
+        vuln_entry = {
             "printf_instruction": source,
             "input_instruction": target,
             "return_address": ret_addr_after_printf
-        })
+        }
         
         canary_pos = (self.stack_vulns["stackSize"]//8) + 5
         
@@ -169,15 +169,18 @@ class MangoRunThis():
         leak_addrs_str = " or ".join(output_parts) if output_parts else f"%{list(offset_to_paths.keys())[0]}$p"
 
         log_msg = (
-            f"Potential format string vulnerability"
-            + " generated from instruction:\n\t"
+            f"format string vulnerability from:\n\t"
             + STYLE_C.RED + "(" + hex(source.address) + ") " + STYLE_C.YELLOW + ' '.join(source.asm)
-            + STYLE_C.END + "\n     getting input from instruction: \n\t"
+            + STYLE_C.END + "\n     input from: \n\t"
             + STYLE_C.RED + "(" + hex(target.address) + ") " + STYLE_C.YELLOW + ' '.join(target.asm)
             + STYLE_C.END
-            + "\n   >>  " + STYLE_C.BLUE + "Leak canary: " + STYLE_C.END + STYLE_C.UNDERLINE + f"%{canary_pos}$p" + STYLE_C.END
-            + STYLE_C.BLUE + f"  |  Leak code addr: " + STYLE_C.END + f"{leak_addrs_str}" + STYLE_C.END + "  <<\n"
+            + "\n   >>  " + STYLE_C.BLUE + "leak canary: " + STYLE_C.END + STYLE_C.UNDERLINE + f"%{canary_pos}$p" + STYLE_C.END
+            + STYLE_C.BLUE + f"  |  leak code addr: " + STYLE_C.END + f"{leak_addrs_str}" + STYLE_C.END + "  <<\n"
         )
+        
+        vuln_entry["leak_offsets"] = list(offset_to_paths.keys())
+        vuln_entry["canary_offset"] = canary_pos
+        self.vulnerabilities["format_strings"].append(vuln_entry)
         
         if len(offset_to_paths) > 1:
             all_same_function = True
@@ -207,8 +210,7 @@ class MangoRunThis():
     
     def __log_overunderflow(self, source:Instruction):
         OK(
-            f"Potential integer overflow/underflow"
-            + " generated from instruction:\n\t"
+            f"possible int over/underflow from:\n\t"
             + STYLE_C.RED + "(" + hex(source.address) + ") " + STYLE_C.YELLOW + ' '.join(source.asm)
             + "\n"
         )
@@ -220,11 +222,11 @@ class MangoRunThis():
             "store_instruction": store_instr
         }
         LOG(
-            f"Stack canary detected at stack position " + STYLE_C.BOLD + STYLE_C.GREEN + f"-{hex(offset)}"
+            f"canary @ " + STYLE_C.BOLD + STYLE_C.GREEN + f"-{hex(offset)}"
             + STYLE_C.END
-            + "\n\tLoaded from fs:0x28 at: "
+            + "\n\tload: "
             + STYLE_C.RED + "(" + hex(load_instr.address) + ") " + STYLE_C.YELLOW + ' '.join(load_instr.asm)
-            + STYLE_C.END + "\n\tStored to stack at: "
+            + STYLE_C.END + "\n\tstore: "
             + STYLE_C.RED + "(" + hex(store_instr.address) + ") " + STYLE_C.YELLOW + ' '.join(store_instr.asm)
             + "\n"
         )
@@ -319,7 +321,7 @@ class MangoRunThis():
                     self.__analyze_call(i, instr)
             
             if (self.cached["io_emulation"] != ""):
-                LOG("Showing emulated IO:");
+                LOG("emulated IO:");
                 print(self.cached["io_emulation"])
                 self.cached["io_emulation"] = ""
     
@@ -615,29 +617,29 @@ class MangoRunThis():
         print("="*60 + "\n")
         
         if self.security:
-            print(STYLE_C.BOLD + "Security Mitigations:" + STYLE_C.END)
+            print(STYLE_C.BOLD + "mitigations:" + STYLE_C.END)
             
             if self.security["pie"]:
-                print(f"   {STYLE_C.RED}PIE: ENABLED{STYLE_C.END} - Addresses randomized at runtime")
+                print(f"   {STYLE_C.RED}PIE: on{STYLE_C.END} - addrs randomized")
             else:
-                print(f"   {STYLE_C.GREEN}PIE: DISABLED{STYLE_C.END} - Fixed addresses")
+                print(f"   {STYLE_C.GREEN}PIE: off{STYLE_C.END} - fixed addrs")
             
             if self.security["relro"]:
                 relro_color = STYLE_C.YELLOW if self.security["relro"] == "Partial" else STYLE_C.RED
                 print(f"   {relro_color}RELRO: {self.security['relro']}{STYLE_C.END}")
             
             if self.security["nx"]:
-                print(f"   {STYLE_C.RED}NX: ENABLED{STYLE_C.END} - Stack not executable")
+                print(f"   {STYLE_C.RED}NX: on{STYLE_C.END} - no shellcode")
             else:
-                print(f"   {STYLE_C.GREEN}NX: DISABLED{STYLE_C.END} - Shellcode possible")
+                print(f"   {STYLE_C.GREEN}NX: off{STYLE_C.END} - shellcode ok")
             
             print()
         
         if self.vulnerabilities["win_functions"]:
-            print(STYLE_C.GREEN + "Target Functions Detected:" + STYLE_C.END)
+            print(STYLE_C.GREEN + "win functions:" + STYLE_C.END)
             main_func = self.functions.get("main")
             for win_func in self.vulnerabilities["win_functions"]:
-                print(f"   + {STYLE_C.YELLOW}{win_func['name']}{STYLE_C.END} at {STYLE_C.CYAN}{hex(win_func['address'])}{STYLE_C.END}", end="")
+                print(f"   + {STYLE_C.YELLOW}{win_func['name']}{STYLE_C.END} @ {STYLE_C.CYAN}{hex(win_func['address'])}{STYLE_C.END}", end="")
                 if main_func and self.security and self.security["pie"]:
                     offset = win_func['address'] - main_func.address
                     offset_sign = "+" if offset >= 0 else ""
@@ -651,7 +653,7 @@ class MangoRunThis():
         
         if has_canary:
             canary_offset = self.vulnerabilities["canary_location"]["offset"]
-            print(STYLE_C.RED + "Stack Canary: ENABLED" + STYLE_C.END + f" at -{hex(canary_offset)}")
+            print(STYLE_C.RED + "canary @ " + STYLE_C.END + f"-{hex(canary_offset)}")
             print()
         
         step_num = 1
@@ -660,63 +662,65 @@ class MangoRunThis():
             has_pie = self.security and self.security["pie"]
             fmt_vuln = self.vulnerabilities["format_strings"][0]
             ret_addr = fmt_vuln["return_address"]
+            leak_offsets = fmt_vuln.get("leak_offsets", [])
+            canary_offset_fmt = fmt_vuln.get("canary_offset", (self.stack_vulns["stackSize"] // 8) + 5)
+            
+            if leak_offsets:
+                ret_addr_position = leak_offsets[len(leak_offsets) // 2]
+            else:
+                ret_addr_position = 17
             
             if has_canary and has_pie:
-                print(STYLE_C.BOLD + f"Step {step_num}: Leak Canary + Binary Base" + STYLE_C.END)
-                canary_position = (self.stack_vulns["stackSize"] // 8) + 5
-                ret_addr_position = 17
-                print(f"   Canary: " + STYLE_C.CYAN + f"%{canary_position}$p" + STYLE_C.END)
-                print(f"   Code address: " + STYLE_C.CYAN + f"%{ret_addr_position}$p" + STYLE_C.END + " or higher (scan stack for code pointers)")
-                print(f"   Binary base: " + STYLE_C.YELLOW + f"leaked_code_addr - {hex(ret_addr)}" + STYLE_C.END + " (or adjust for different leak)")
+                print(STYLE_C.BOLD + f"step {step_num}: leak canary + base" + STYLE_C.END)
+                print(f"   canary: " + STYLE_C.CYAN + f"%{canary_offset_fmt}$p" + STYLE_C.END)
+                print(f"   code addr: " + STYLE_C.CYAN + f"%{ret_addr_position}$p" + STYLE_C.END)
+                print(f"   base: " + STYLE_C.YELLOW + f"code_leak - {hex(ret_addr)}" + STYLE_C.END)
                 if self.vulnerabilities["win_functions"]:
                     win_func = self.vulnerabilities["win_functions"][0]
                     main_func = self.functions.get("main")
                     if main_func:
                         offset = win_func['address'] - main_func.address
-                        print(f"   Win addr: " + STYLE_C.YELLOW + f"base + {hex(win_func['address'])}" + STYLE_C.END + f" (or main{offset:+d})")
+                        print(f"   win: " + STYLE_C.YELLOW + f"base + {hex(win_func['address'])}" + STYLE_C.END + f" (main{offset:+d})")
                 print()
                 step_num += 1
             elif has_canary:
-                print(STYLE_C.BOLD + f"Step {step_num}: Leak Canary" + STYLE_C.END)
-                canary_position = (self.stack_vulns["stackSize"] // 8) + 5
-                print(f"   Format string payload: " + STYLE_C.CYAN + f"%{canary_position}$p" + STYLE_C.END)
+                print(STYLE_C.BOLD + f"step {step_num}: leak canary" + STYLE_C.END)
+                print(f"   payload: " + STYLE_C.CYAN + f"%{canary_offset_fmt}$p" + STYLE_C.END)
                 print()
                 step_num += 1
             elif has_pie:
-                print(STYLE_C.BOLD + f"Step {step_num}: Leak Binary Base" + STYLE_C.END)
-                canary_position = (self.stack_vulns["stackSize"] // 8) + 5
-                ret_addr_position = 17
-                print(f"   Code address: " + STYLE_C.CYAN + f"%{ret_addr_position}$p" + STYLE_C.END + " or higher (scan stack for code pointers)")
-                print(f"   Binary base: " + STYLE_C.YELLOW + f"leaked_code_addr - {hex(ret_addr)}" + STYLE_C.END + " (or adjust for different leak)")
+                print(STYLE_C.BOLD + f"step {step_num}: leak base" + STYLE_C.END)
+                print(f"   code addr: " + STYLE_C.CYAN + f"%{ret_addr_position}$p" + STYLE_C.END)
+                print(f"   base: " + STYLE_C.YELLOW + f"code_leak - {hex(ret_addr)}" + STYLE_C.END)
                 if self.vulnerabilities["win_functions"]:
                     win_func = self.vulnerabilities["win_functions"][0]
                     main_func = self.functions.get("main")
                     if main_func:
                         offset = win_func['address'] - main_func.address
-                        print(f"   Win addr: " + STYLE_C.YELLOW + f"base + {hex(win_func['address'])}" + STYLE_C.END + f" (or main{offset:+d})")
+                        print(f"   win: " + STYLE_C.YELLOW + f"base + {hex(win_func['address'])}" + STYLE_C.END + f" (main{offset:+d})")
                 print()
                 step_num += 1
         elif has_canary and not has_format_string:
-            print(STYLE_C.YELLOW + "Canary bypass needed (no format string available)" + STYLE_C.END)
+            print(STYLE_C.YELLOW + "need canary leak (no fmt string)" + STYLE_C.END)
             print()
 
         
         if has_buffer_overflow:
             overflow = self.vulnerabilities["buffer_overflows"][0]
-            print(STYLE_C.BOLD + f"Step {step_num}: Overflow to RIP" + STYLE_C.END)
+            print(STYLE_C.BOLD + f"step {step_num}: overflow" + STYLE_C.END)
             
             if overflow["buffer_size"] and overflow["read_size"]:
                 overflow_bytes = overflow['read_size'] - overflow['buffer_size']
-                print(f"   Buffer: {STYLE_C.CYAN}{overflow['stack_position']}{STYLE_C.END}, size={overflow['buffer_size']}B, can write {overflow['read_size']}B (overflow: {overflow_bytes}B)")
+                print(f"   buf @ {STYLE_C.CYAN}{overflow['stack_position']}{STYLE_C.END}, size={overflow['buffer_size']}B, writes {overflow['read_size']}B (overflow {overflow_bytes}B)")
             else:
-                print(f"   Buffer: {STYLE_C.CYAN}{overflow['stack_position']}{STYLE_C.END}, unlimited overflow")
+                print(f"   buf @ {STYLE_C.CYAN}{overflow['stack_position']}{STYLE_C.END}, unlimited overflow")
             print()
             step_num += 1
             
             if overflow["stack_position"]:
                 stack_pos_value = int(overflow["stack_position"].replace("-", "").replace("0x", ""), 16)
                 
-                print(STYLE_C.BOLD + f"Step {step_num}: Payload Structure" + STYLE_C.END)
+                print(STYLE_C.BOLD + f"step {step_num}: payload" + STYLE_C.END)
                 
                 if has_canary:
                     canary_padding = stack_pos_value - canary_offset
@@ -731,13 +735,13 @@ class MangoRunThis():
                         ret_str = "<RIP>"
                     
                     print(f"   ┌──────────────────────────────────────────┐")
-                    print(f"   │ {STYLE_C.CYAN}{'Padding':<15}{STYLE_C.END} │ {padding_str:>22} │")
+                    print(f"   │ {STYLE_C.CYAN}{'padding':<15}{STYLE_C.END} │ {padding_str:>22} │")
                     print(f"   ├──────────────────────────────────────────┤")
-                    print(f"   │ {STYLE_C.GREEN}{'Canary':<15}{STYLE_C.END} │ {canary_str:>22} │")
+                    print(f"   │ {STYLE_C.GREEN}{'canary':<15}{STYLE_C.END} │ {canary_str:>22} │")
                     print(f"   ├──────────────────────────────────────────┤")
-                    print(f"   │ {STYLE_C.YELLOW}{'Saved RBP':<15}{STYLE_C.END} │ {rbp_str:>22} │")
+                    print(f"   │ {STYLE_C.YELLOW}{'saved rbp':<15}{STYLE_C.END} │ {rbp_str:>22} │")
                     print(f"   ├──────────────────────────────────────────┤")
-                    print(f"   │ {STYLE_C.MAGENTA}{'Return Addr':<15}{STYLE_C.END} │ {ret_str:>22} │")
+                    print(f"   │ {STYLE_C.MAGENTA}{'return addr':<15}{STYLE_C.END} │ {ret_str:>22} │")
                     print(f"   └──────────────────────────────────────────┘")
                 else:
                     padding_str = f"{stack_pos_value}B"
@@ -750,18 +754,18 @@ class MangoRunThis():
                         ret_str = "<RIP>"
                     
                     print(f"   ┌──────────────────────────────────────────┐")
-                    print(f"   │ {STYLE_C.CYAN}{'Padding':<15}{STYLE_C.END} │ {padding_str:>22} │")
+                    print(f"   │ {STYLE_C.CYAN}{'padding':<15}{STYLE_C.END} │ {padding_str:>22} │")
                     print(f"   ├──────────────────────────────────────────┤")
-                    print(f"   │ {STYLE_C.YELLOW}{'Saved RBP':<15}{STYLE_C.END} │ {rbp_str:>22} │")
+                    print(f"   │ {STYLE_C.YELLOW}{'saved rbp':<15}{STYLE_C.END} │ {rbp_str:>22} │")
                     print(f"   ├──────────────────────────────────────────┤")
-                    print(f"   │ {STYLE_C.MAGENTA}{'Return Addr':<15}{STYLE_C.END} │ {ret_str:>22} │")
+                    print(f"   │ {STYLE_C.MAGENTA}{'return addr':<15}{STYLE_C.END} │ {ret_str:>22} │")
                     print(f"   └──────────────────────────────────────────┘")
                 
                 print()
                 step_num += 1
         
         if self.security and self.security["pie"] and self.vulnerabilities["win_functions"] and not has_format_string:
-            print(STYLE_C.YELLOW + "Note: PIE enabled but no format string to leak addresses" + STYLE_C.END)
+            print(STYLE_C.YELLOW + "note: pie on but no fmt string to leak addrs" + STYLE_C.END)
             print()
         
         print("\n" + "="*60 + "\n")
