@@ -1,0 +1,52 @@
+mango - binary vuln analysis
+============================
+
+finds vulns in binaries via static analysis
+
+usage:
+    python3 mango <binary> [--libs <remote-libs.zip>]
+
+
+what it finds:
+    - buffer overflows (with sizes)
+    - format strings (with offsets)
+    - unterminated string leaks
+    - stack canaries
+    - security mitigations (PIE/NX/RELRO)
+    - generates exploit payloads
+
+examples:
+    python3 mango/main.py ./binary
+    python3 mango/main.py ./binary --libs server-libs.zip
+
+
+format string offsets:
+    if there's a printf vuln, you get specific offsets like:
+        canary at %9$p
+        return address at %11$p
+    
+    handles nested functions and multiple code paths
+    offsets vary by GLIBC version, use --libs for compability
+
+
+glibc-aware analysis:
+    different GLIBC versions have different stack layouts
+    pass --libs with a zip of the remote libc to get accurate offsets
+    
+    local GLIBC 2.42 might say %17$p
+    remote GLIBC 2.35 might be %15$p
+
+
+what you get:
+    - exact stack positions
+    - overflow sizes  
+    - canary locations
+    - payload structure diagrams
+    - which offsets to use for leaks
+
+
+modules:
+    utcq/cstdio - finds C stdio vulns
+
+requires:
+    python3, objdump

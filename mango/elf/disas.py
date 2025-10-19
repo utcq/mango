@@ -28,6 +28,7 @@ class Function:
 
 class Disassembler:
     def __init__(self, path:str):
+        self.path = path
         self.functions: dict[str, Function] = {}
         fd=popen("objdump " + " ".join(OBJDUMP_FLAGS) + " " + path)
         lines = fd.readlines()
@@ -46,6 +47,8 @@ class Disassembler:
         lines = fd.readlines()
         fd.close()
         self.parse_rodata(lines)
+        
+        self.security = self.__detect_security_features()
 
     def get_rodata(self)->dict:
         return self.rodata
@@ -127,3 +130,59 @@ class Disassembler:
         elif (self.current_function and self.isInstruction(line)):
             self.parseInstruction(line)
             return
+    
+    def __detect_security_features(self):
+        security = {
+            "pie": False,
+            "relro": None,
+            "nx": False,
+            "canary": False
+        }
+        
+        fd = popen(f"readelf -h {self.path}")
+        lines = fd.readlines()
+        fd.close()
+        for line in lines:
+            if "Type:" in line and "DYN" in line:
+                security["pie"] = True
+        
+        fd = popen(f"readelf -l {self.path}")
+        lines = fd.readlines()
+        fd.close()
+        gnu_relro = False
+        for line in lines:
+            if "GNU_RELRO" in line:
+                gnu_relro = True
+        
+        bind_now = False
+        fd = popen(f"readelf -d {self.path}")
+        lines = fd.readlines()
+        fd.close()
+        for line in lines:
+            if "BIND_NOW" in line or ("FLAGS" in line and "BIND_NOW" in line):
+                bind_now = True
+        
+        if gnu_relro and bind_now:
+            security["relro"] = "Full"
+        elif gnu_relro:
+            security["relro"] = "Partial"
+        
+        fd = popen(f"readelf -l {self.path}")
+        lines = fd.readlines()
+        fd.close()
+        for line in lines:
+            if "GNU_STACK" in line and "RWE" not in line:
+                security["nx"] = True
+        
+        fd = popen(f"readelf -s {self.path}")
+        lines = fd.readlines()
+        fd.close()
+        for line in lines:
+            if "__stack_chk_fail" in line:
+                security["canary"] = True
+                break
+        
+        return security
+    
+    def get_security(self):
+        return self.security

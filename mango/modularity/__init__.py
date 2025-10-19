@@ -70,9 +70,14 @@ class MangoModules:
             print(f"Description: {mod_conf['description']}")
         print("-"*24)
 
-    def run_analysis(self, functions:list, rodata:dict):
+    def run_analysis(self, functions:list, rodata:dict, security:dict=None, remote_info:dict=None):
         for module, conf, py_mod in self.analysis_queue:
             if "MangoRunThis" in dir(py_mod):
                 self.dump_module(module, conf)
-                py_mod.MangoRunThis(functions, rodata)
+                if security is not None and remote_info is not None:
+                    py_mod.MangoRunThis(functions, rodata, security, remote_info)
+                elif security is not None:
+                    py_mod.MangoRunThis(functions, rodata, security)
+                else:
+                    py_mod.MangoRunThis(functions, rodata)
                 print("\n")
