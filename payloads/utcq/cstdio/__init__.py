@@ -105,7 +105,7 @@ class MangoRunThis():
             + STYLE_C.END
             + "\n\tprinted by:\n\t"
             + STYLE_C.RED + "(" + hex(print_instr.address) + ") " + STYLE_C.YELLOW + ' '.join(print_instr.asm)
-            + STYLE_C.END
+            + STYLE_C.END + "\n"
         )
     
     def __log_format_vuln(self, source:Instruction, target:Instruction):
